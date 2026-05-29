@@ -1,13 +1,12 @@
 require('dotenv').config();
 const express = require('express'); 
 const path = require('path');
-
 const app = require("./src/app"); 
 const connectDB = require("./src/config/db");
 const { initCronJobs } = require('./src/config/cronService');
-
-// 1. Import your new routes file
 const uploadRoutes = require('./src/routes/upload.route.js'); 
+const firRoutes = require('./src/routes/fir.route.js'); 
+const caseRoutes = require('./src/routes/case.route.js');
 
 // 2. Connect to Database
 connectDB();
@@ -21,6 +20,8 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // 5. Apply the Routes
 // This tells Express: "For any URL that starts with /api/documents, use the uploadRoutes file"
 app.use('/api/documents', uploadRoutes);
+app.use('/api/fir', firRoutes);
+app.use('/api/cases', caseRoutes);
 
 // 6. Start the Server
 const PORT = process.env.PORT || 5000;

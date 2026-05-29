@@ -1,7 +1,17 @@
 const { GoogleGenAI } = require('@google/genai');
+const nodemailer = require('nodemailer');
 
 // Initialize Gemini
-const ai = new GoogleGenAI();
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+// Nodemailer transporter
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS
+  }
+});
 
 // 1. Generate an FIR Draft
 const generateFirDraft = async (req, res) => {
@@ -77,9 +87,19 @@ const generateFirComplaint = async (req, res) => {
       contents: prompt,
     });
 
+    const draftText = response.text;
+
+    // Send complaint draft to test receiver
+    await transporter.sendMail({
+      from: process.env.EMAIL_USER,
+      to: process.env.TEST_RECEIVER_EMAIL,
+      subject: `FIR Complaint Draft - ${firDetails}`,
+      text: draftText
+    });
+
     res.status(200).json({
       message: "FIR Complaint generated successfully",
-      draftText: response.text
+      draftText
     });
 
   } catch (error) {
