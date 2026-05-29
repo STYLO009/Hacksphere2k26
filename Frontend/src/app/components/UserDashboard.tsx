@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useNavigate } from "react-router";
 import {
@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { DayPicker } from "react-day-picker";
 import "react-day-picker/dist/style.css";
+import { apiFetch, getToken, setToken, clearToken, getUser, setUser, clearUser } from "../../lib/api";
 
 const sidebarItems = [
   { icon: LayoutDashboard, label: "Dashboard", id: "dashboard" },
@@ -29,19 +30,42 @@ const initialMessages = [
   { from: "agent", text: "Namaste! I'm your Nyaya Saathi AI Agent. I'm here to help you understand your legal rights, decode documents, or guide you through any legal situation. How can I assist you today?" },
 ];
 
-function AgentModal({ onClose }) {
+function AgentModal({ onClose }: { onClose: () => void }) {
   const [messages, setMessages] = useState(initialMessages);
   const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
-  const send = () => {
-    if (!input.trim()) return;
-    const userMsg = { from: "user", text: input };
-    const reply = { from: "agent", text: "Thank you for your question. I'm analyzing the relevant sections of Indian law to provide you with the most accurate guidance. Please give me a moment..." };
-    setMessages((prev) => [...prev, userMsg, reply]);
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages, loading]);
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || loading) return;
     setInput("");
+    setMessages(prev => [...prev, { from: "user", text }]);
+    setLoading(true);
+    try {
+      const res = await fetch("https://disdain-kindly-old.ngrok-free.dev/chat",{
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "ngrok-skip-browser-warning": "true",
+        },
+        body: JSON.stringify({ message: text }),
+      });
+      const data = await res.json();
+      const reply = data?.response ?? data?.message ?? data?.answer ?? JSON.stringify(data);
+      setMessages(prev => [...prev, { from: "agent", text: reply }]);
+    } catch {
+      setMessages(prev => [...prev, { from: "agent", text: "Sorry, I couldn't reach the server. Please try again." }]);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleKey = (e) => {
+  const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
   };
 
@@ -75,7 +99,7 @@ function AgentModal({ onClose }) {
             <X className="w-4 h-4 text-white/60" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-[#F8FAFC]">
+        <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-4 bg-[#F8FAFC]">
           {messages.map((msg, i) => (
             <div key={i} className={`flex gap-3 ${msg.from === "user" ? "flex-row-reverse" : ""}`}>
               {msg.from === "agent" && (
@@ -91,6 +115,18 @@ function AgentModal({ onClose }) {
               </div>
             </div>
           ))}
+          {loading && (
+            <div className="flex gap-3">
+              <div className="w-7 h-7 bg-[#0F172A] rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
+                <Scale className="w-3.5 h-3.5 text-white" />
+              </div>
+              <div className="bg-white border border-[#E5E7EB] rounded-2xl px-4 py-3 flex items-center gap-1.5" style={{ boxShadow: "0 2px 8px rgba(15,23,42,0.06)" }}>
+                <span className="w-2 h-2 bg-[#9CA3AF] rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                <span className="w-2 h-2 bg-[#9CA3AF] rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                <span className="w-2 h-2 bg-[#9CA3AF] rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+              </div>
+            </div>
+          )}
         </div>
         <div className="p-4 border-t border-[#E5E7EB] bg-white flex-shrink-0">
           <div className="flex items-center gap-2 border border-[#E5E7EB] rounded-xl px-3 py-2 focus-within:border-[#0F172A] focus-within:ring-2 focus-within:ring-[#0F172A]/10 transition-all">
@@ -99,12 +135,10 @@ function AgentModal({ onClose }) {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKey}
               placeholder="Ask your legal question..."
-              className="flex-1 text-sm text-[#111111] placeholder-[#9CA3AF] focus:outline-none bg-transparent"
+              disabled={loading}
+              className="flex-1 text-sm text-[#111111] placeholder-[#9CA3AF] focus:outline-none bg-transparent disabled:opacity-60"
             />
-            <button className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-[#F8FAFC] transition-colors text-[#9CA3AF] hover:text-[#0F172A]">
-              <Mic className="w-4 h-4" />
-            </button>
-            <button onClick={send} className="w-7 h-7 bg-[#0F172A] rounded-lg flex items-center justify-center hover:bg-[#1E3A5F] transition-colors">
+            <button onClick={send} disabled={loading || !input.trim()} className="w-7 h-7 bg-[#0F172A] rounded-lg flex items-center justify-center hover:bg-[#1E3A5F] transition-colors disabled:opacity-50">
               <Send className="w-3.5 h-3.5 text-white" />
             </button>
           </div>
@@ -118,13 +152,36 @@ function AgentModal({ onClose }) {
 function FIRSection() {
   const [selected, setSelected] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
 
-  const options = [
+  // Write FIR form state
+  const [writeForm, setWriteForm] = useState({ complainantName: "", datePlace: "", description: "", accusedDetails: "" });
+  // Complaint form state
+  const [complaintForm, setComplaintForm] = useState({ firDetails: "", natureOfComplaint: "", reliefSought: "" });
+
+  const handleGenerateFIR = async () => {
+    setLoading(true); setResult(null);
+    try {
+      const data = await apiFetch("/fir/draft", { method: "POST", body: JSON.stringify({ complainantName: writeForm.complainantName, datePlace: writeForm.datePlace, description: writeForm.description, accusedDetails: writeForm.accusedDetails }) });
+      setResult(data.draftText);
+    } catch (e: any) { setResult("Error: " + e.message); }
+    finally { setLoading(false); }
+  };
+
+  const handleGenerateComplaint = async () => {
+    setLoading(true); setResult(null);
+    try {
+      const data = await apiFetch("/fir/complaint", { method: "POST", body: JSON.stringify(complaintForm) });
+      setResult(data.draftText);
+    } catch (e: any) { setResult("Error: " + e.message); }
+    finally { setLoading(false); }
+  };
+
+  const selectedOption = [
     { id: "write", label: "Write an FIR", icon: FileText, desc: "Draft and file a First Information Report with guided AI assistance", color: "text-red-600", bg: "bg-red-50 border-red-100" },
     { id: "complaint", label: "Complaint regarding FIR", icon: ShieldAlert, desc: "File a complaint about an existing FIR — delayed registration, false FIR, or improper investigation", color: "text-orange-600", bg: "bg-orange-50 border-orange-100" },
-  ];
-
-  const selectedOption = options.find(o => o.id === selected);
+  ].find(o => o.id === selected);
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -153,10 +210,13 @@ function FIRSection() {
                 className="absolute top-full left-0 right-0 mt-2 bg-white border border-[#E5E7EB] rounded-xl overflow-hidden z-20"
                 style={{ boxShadow: "0 8px 32px rgba(15,23,42,0.12)" }}
               >
-                {options.map((opt) => (
+                {[
+                  { id: "write", label: "Write an FIR", icon: FileText, desc: "Draft and file a First Information Report with guided AI assistance", color: "text-red-600", bg: "bg-red-50 border-red-100" },
+                  { id: "complaint", label: "Complaint regarding FIR", icon: ShieldAlert, desc: "File a complaint about an existing FIR — delayed registration, false FIR, or improper investigation", color: "text-orange-600", bg: "bg-orange-50 border-orange-100" },
+                ].map((opt) => (
                   <button
                     key={opt.id}
-                    onClick={() => { setSelected(opt.id); setDropdownOpen(false); }}
+                    onClick={() => { setSelected(opt.id); setDropdownOpen(false); setResult(null); }}
                     className="w-full flex items-center gap-3 px-4 py-3.5 hover:bg-[#F8FAFC] transition-colors text-left border-b border-[#F1F5F9] last:border-0"
                   >
                     <div className={`w-9 h-9 rounded-lg flex items-center justify-center border ${opt.bg}`}>
@@ -173,7 +233,7 @@ function FIRSection() {
           </AnimatePresence>
         </div>
 
-        {/* Action after selection */}
+        {/* Form content */}
         <AnimatePresence>
           {selected && (
             <motion.div
@@ -187,15 +247,16 @@ function FIRSection() {
                   <p className="text-sm text-[#0F172A]" style={{ fontWeight: 600 }}>Write an FIR</p>
                   <p className="text-xs text-[#6B7280]">Our AI will guide you step-by-step through drafting a legally accurate FIR with all required sections under Bharatiya Nagarik Suraksha Sanhita (BNSS).</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {["Name of complainant", "Date & place of incident", "Description of offence", "Accused details (if known)"].map((field, i) => (
-                      <div key={i} className="bg-[#F8FAFC] border border-[#E5E7EB] rounded-xl p-3">
-                        <label className="block text-[10px] text-[#9CA3AF] mb-1" style={{ fontWeight: 600 }}>{field.toUpperCase()}</label>
-                        <input placeholder={`Enter ${field.toLowerCase()}...`} className="w-full text-sm text-[#0F172A] bg-transparent focus:outline-none placeholder-[#D1D5DB]" />
+                    {([["complainantName","Name of complainant"],["datePlace","Date & place of incident"],["description","Description of offence"],["accusedDetails","Accused details (if known)"]] as [keyof typeof writeForm, string][]).map(([key, label]) => (
+                      <div key={key} className="bg-[#F8FAFC] border border-[#E5E7EB] rounded-xl p-3">
+                        <label className="block text-[10px] text-[#9CA3AF] mb-1" style={{ fontWeight: 600 }}>{label.toUpperCase()}</label>
+                        <input value={writeForm[key]} onChange={e => setWriteForm(f => ({ ...f, [key]: e.target.value }))} placeholder={`Enter ${label.toLowerCase()}...`} className="w-full text-sm text-[#0F172A] bg-transparent focus:outline-none placeholder-[#D1D5DB]" />
                       </div>
                     ))}
                   </div>
-                  <button className="mt-2 px-5 py-2.5 bg-[#0F172A] text-white rounded-xl text-sm hover:bg-[#1E3A5F] transition-colors flex items-center gap-2" style={{ fontWeight: 600 }}>
-                    Generate FIR Draft with AI
+                  {result && <pre className="text-xs text-[#374151] bg-[#F8FAFC] border border-[#E5E7EB] rounded-xl p-4 whitespace-pre-wrap max-h-64 overflow-y-auto">{result}</pre>}
+                  <button onClick={handleGenerateFIR} disabled={loading} className="mt-2 px-5 py-2.5 bg-[#0F172A] text-white rounded-xl text-sm hover:bg-[#1E3A5F] transition-colors flex items-center gap-2 disabled:opacity-60" style={{ fontWeight: 600 }}>
+                    {loading ? "Generating..." : "Generate FIR Draft with AI"}
                   </button>
                 </div>
               )}
@@ -204,23 +265,26 @@ function FIRSection() {
                   <p className="text-sm text-[#0F172A]" style={{ fontWeight: 600 }}>Complaint regarding FIR</p>
                   <p className="text-xs text-[#6B7280]">File a complaint about an existing FIR — including delayed registration, false FIR, or improper investigation to a Superintendent of Police or Magistrate.</p>
                   <div className="space-y-3">
-                    {["FIR Number / Station", "Nature of complaint", "Relief sought"].map((field, i) => (
-                      <div key={i} className="bg-[#F8FAFC] border border-[#E5E7EB] rounded-xl p-3">
-                        <label className="block text-[10px] text-[#9CA3AF] mb-1" style={{ fontWeight: 600 }}>{field.toUpperCase()}</label>
-                        {i === 1 ? (
-                          <textarea rows={2} placeholder={`Enter ${field.toLowerCase()}...`} className="w-full text-sm text-[#0F172A] bg-transparent focus:outline-none placeholder-[#D1D5DB] resize-none" />
-                        ) : (
-                          <input placeholder={`Enter ${field.toLowerCase()}...`} className="w-full text-sm text-[#0F172A] bg-transparent focus:outline-none placeholder-[#D1D5DB]" />
-                        )}
-                      </div>
-                    ))}
+                    <div className="bg-[#F8FAFC] border border-[#E5E7EB] rounded-xl p-3">
+                      <label className="block text-[10px] text-[#9CA3AF] mb-1" style={{ fontWeight: 600 }}>FIR NUMBER / STATION</label>
+                      <input value={complaintForm.firDetails} onChange={e => setComplaintForm(f => ({ ...f, firDetails: e.target.value }))} placeholder="Enter FIR number / station..." className="w-full text-sm text-[#0F172A] bg-transparent focus:outline-none placeholder-[#D1D5DB]" />
+                    </div>
+                    <div className="bg-[#F8FAFC] border border-[#E5E7EB] rounded-xl p-3">
+                      <label className="block text-[10px] text-[#9CA3AF] mb-1" style={{ fontWeight: 600 }}>NATURE OF COMPLAINT</label>
+                      <textarea rows={2} value={complaintForm.natureOfComplaint} onChange={e => setComplaintForm(f => ({ ...f, natureOfComplaint: e.target.value }))} placeholder="Enter nature of complaint..." className="w-full text-sm text-[#0F172A] bg-transparent focus:outline-none placeholder-[#D1D5DB] resize-none" />
+                    </div>
+                    <div className="bg-[#F8FAFC] border border-[#E5E7EB] rounded-xl p-3">
+                      <label className="block text-[10px] text-[#9CA3AF] mb-1" style={{ fontWeight: 600 }}>RELIEF SOUGHT</label>
+                      <input value={complaintForm.reliefSought} onChange={e => setComplaintForm(f => ({ ...f, reliefSought: e.target.value }))} placeholder="Enter relief sought..." className="w-full text-sm text-[#0F172A] bg-transparent focus:outline-none placeholder-[#D1D5DB]" />
+                    </div>
                   </div>
-                  <button className="mt-2 px-5 py-2.5 bg-[#0F172A] text-white rounded-xl text-sm hover:bg-[#1E3A5F] transition-colors flex items-center gap-2" style={{ fontWeight: 600 }}>
-                    Draft Complaint with AI
+                  {result && <pre className="text-xs text-[#374151] bg-[#F8FAFC] border border-[#E5E7EB] rounded-xl p-4 whitespace-pre-wrap max-h-64 overflow-y-auto">{result}</pre>}
+                  <button onClick={handleGenerateComplaint} disabled={loading} className="mt-2 px-5 py-2.5 bg-[#0F172A] text-white rounded-xl text-sm hover:bg-[#1E3A5F] transition-colors flex items-center gap-2 disabled:opacity-60" style={{ fontWeight: 600 }}>
+                    {loading ? "Generating..." : "Draft Complaint with AI"}
                   </button>
                 </div>
               )}
-            </motion.div>
+             </motion.div>
           )}
         </AnimatePresence>
       </div>
@@ -246,23 +310,48 @@ function FIRSection() {
 }
 
 // ── Reminders Section ─────────────────────────────────────────────────────────
-const upcomingReminders = [
-  { title: "District Court Hearing — Room 4B", date: "Tomorrow, 10:00 AM", type: "Hearing", urgent: true },
-  { title: "Submit Written Statement", date: "Jun 14, 2026", type: "Deadline", urgent: true },
-  { title: "High Court — Writ Petition", date: "Jun 20, 2026", type: "Hearing", urgent: false },
-  { title: "Document Submission — Consumer Forum", date: "Jun 25, 2026", type: "Deadline", urgent: false },
-  { title: "RTI Response Review", date: "Jul 3, 2026", type: "Task", urgent: false },
-];
-
 function RemindersSection() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [uploadedFile, setUploadedFile] = useState<string | null>(null);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [reminders, setReminders] = useState<any[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const formatDate = (d?: Date) => d ? d.toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" }) : "";
+
+  useEffect(() => {
+    apiFetch("/reminders/manual").then(d => setReminders(d.data ?? [])).catch(() => {});
+  }, []);
+
+  const handleSetReminder = async () => {
+    if (!title || !description || !selectedDate) return;
+    setSaving(true);
+    try {
+      const data = await apiFetch("/reminders/manual", { method: "POST", body: JSON.stringify({ caseTitle: title, description, hearingDate: selectedDate.toISOString().split("T")[0] }) });
+      setReminders(prev => [data.data, ...prev]);
+      setTitle(""); setDescription(""); setSelectedDate(undefined);
+    } catch (e) {}
+    finally { setSaving(false); }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadedFile(file);
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("document", file);
+      const data = await apiFetch("/reminders/ai-upload", { method: "POST", body: fd });
+      setReminders(prev => [data.data, ...prev]);
+      setUploadedFile(null);
+    } catch (e) {}
+    finally { setUploading(false); e.target.value = ""; }
+  };
 
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
@@ -333,8 +422,8 @@ function RemindersSection() {
               </div>
             </div>
 
-            <button className="px-5 py-2.5 bg-[#0F172A] text-white rounded-xl text-sm hover:bg-[#1E3A5F] transition-colors flex items-center gap-2" style={{ fontWeight: 600 }}>
-              <Bell className="w-4 h-4" /> Set Reminder
+            <button onClick={handleSetReminder} disabled={saving || !title || !description || !selectedDate} className="px-5 py-2.5 bg-[#0F172A] text-white rounded-xl text-sm hover:bg-[#1E3A5F] transition-colors flex items-center gap-2 disabled:opacity-60" style={{ fontWeight: 600 }}>
+              <Bell className="w-4 h-4" /> {saving ? "Saving..." : "Set Reminder"}
             </button>
           </div>
 
@@ -349,16 +438,12 @@ function RemindersSection() {
           <div className="flex-1 flex flex-col justify-center">
             <p className="text-sm text-[#0F172A] mb-2" style={{ fontWeight: 600 }}>Upload Reminders from Document</p>
             <p className="text-xs text-[#9CA3AF] mb-4" style={{ lineHeight: 1.6 }}>Upload a court order, notice, or legal document and our AI will automatically extract and set reminders for all important dates.</p>
-            <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.png" className="hidden" onChange={e => {
-              if (e.target.files?.[0]) setUploadedFile(e.target.files[0].name);
-            }} />
+            <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,.jpg,.png" className="hidden" onChange={handleFileUpload} />
             {uploadedFile ? (
               <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-xl">
                 <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
-                <p className="text-xs text-green-700 flex-1 truncate" style={{ fontWeight: 500 }}>{uploadedFile}</p>
-                <button onClick={() => setUploadedFile(null)} className="text-[#9CA3AF] hover:text-red-500 transition-colors">
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                <p className="text-xs text-green-700 flex-1 truncate" style={{ fontWeight: 500 }}>{uploading ? "Processing with AI..." : uploadedFile.name}</p>
+                {!uploading && <button onClick={() => setUploadedFile(null)} className="text-[#9CA3AF] hover:text-red-500 transition-colors"><X className="w-3.5 h-3.5" /></button>}
               </div>
             ) : (
               <button
@@ -383,24 +468,22 @@ function RemindersSection() {
         <div className="px-6 py-4 border-b border-[#E5E7EB] flex items-center gap-2">
           <Bell className="w-4 h-4 text-[#0F172A]" />
           <span className="text-[#0F172A] text-sm" style={{ fontWeight: 700 }}>Upcoming Reminders</span>
-          <span className="text-[10px] bg-[#0F172A] text-white px-2 py-0.5 rounded-full ml-1" style={{ fontWeight: 600 }}>{upcomingReminders.length}</span>
+          <span className="text-[10px] bg-[#0F172A] text-white px-2 py-0.5 rounded-full ml-1" style={{ fontWeight: 600 }}>{reminders.length}</span>
         </div>
         <div className="divide-y divide-[#F1F5F9]">
-          {upcomingReminders.map((r, i) => (
+          {reminders.length === 0 && <p className="text-xs text-[#9CA3AF] px-6 py-4">No reminders yet.</p>}
+          {reminders.map((r: any, i: number) => (
             <div key={i} className="flex items-center gap-4 px-6 py-3.5 hover:bg-[#F8FAFC] transition-colors">
-              <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${r.urgent ? "bg-red-50 border border-red-100" : "bg-[#F1F5F9]"}`}>
-                <Bell className={`w-4 h-4 ${r.urgent ? "text-red-500" : "text-[#9CA3AF]"}`} />
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 bg-[#F1F5F9]">
+                <Bell className="w-4 h-4 text-[#9CA3AF]" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-[#0F172A] truncate" style={{ fontWeight: 500 }}>{r.title}</p>
+                <p className="text-sm text-[#0F172A] truncate" style={{ fontWeight: 500 }}>{r.caseTitle ?? r.title}</p>
                 <div className="flex items-center gap-1.5 mt-0.5">
                   <Clock className="w-3 h-3 text-[#9CA3AF]" />
-                  <p className="text-xs text-[#9CA3AF]">{r.date}</p>
+                  <p className="text-xs text-[#9CA3AF]">{r.hearingDate ? new Date(r.hearingDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : ""}</p>
                 </div>
               </div>
-              <span className={`text-[10px] px-2 py-0.5 rounded-full flex-shrink-0 ${r.urgent ? "bg-red-50 text-red-600 border border-red-100" : "bg-[#F1F5F9] text-[#6B7280]"}`} style={{ fontWeight: 600 }}>
-                {r.type}
-              </span>
             </div>
           ))}
         </div>
@@ -412,50 +495,67 @@ function RemindersSection() {
 // ── Case Tracking Section ─────────────────────────────────────────────────────
 const CASE_STAGES = ["Filed", "Admitted", "Evidence", "Arguments", "Judgment"];
 
-const cases = [
-  {
-    id: "CASE-001",
-    title: "Civil Dispute — Land Ownership",
-    court: "District Court, Delhi",
-    nextDate: "Jun 12, 2026",
-    status: "Hearing",
-    statusColor: "bg-blue-50 text-blue-600 border-blue-100",
-    progress: 60,
-  },
-  {
-    id: "CASE-002",
-    title: "Consumer Forum — Defective Product",
-    court: "Consumer Forum, Delhi",
-    nextDate: "Jun 18, 2026",
-    status: "Filed",
-    statusColor: "bg-green-50 text-green-600 border-green-100",
-    progress: 20,
-  },
-  {
-    id: "CASE-003",
-    title: "RTI Appeal — Information Denied",
-    court: "State Info. Commission",
-    nextDate: "Jul 3, 2026",
-    status: "Pending",
-    statusColor: "bg-yellow-50 text-yellow-600 border-yellow-100",
-    progress: 35,
-  },
-];
-
-// stageAnswers: Record<caseId, Record<stageIndex, "yes" | "no" | null>>
 function CaseTrackingSection() {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showAddCase, setShowAddCase] = useState(false);
   const [stageAnswers, setStageAnswers] = useState<Record<string, Record<number, "yes" | "no" | null>>>({});
+  const [caseList, setCaseList] = useState<any[]>([]);
+  const [addForm, setAddForm] = useState({ caseTitle: "", courtName: "", caseNumber: "", nextHearingDate: "" });
+  const [saving, setSaving] = useState(false);
 
-  const setAnswer = (caseId: string, stageIdx: number, answer: "yes" | "no") => {
+  useEffect(() => {
+    apiFetch("/cases/").then(d => {
+      const list = d.data ?? d;
+      setCaseList(list);
+      // Pre-fill stageAnswers based on currentStage from DB
+      const initial: Record<string, Record<number, "yes" | "no" | null>> = {};
+      list.forEach((c: any) => {
+        const id = c._id ?? c.id;
+        const stageIdx = CASE_STAGES.indexOf(c.currentStage);
+        if (stageIdx >= 0) {
+          initial[id] = {};
+          for (let i = 0; i <= stageIdx; i++) initial[id][i] = "yes";
+        }
+      });
+      setStageAnswers(initial);
+    }).catch(() => {});
+  }, []);
+
+  const handleSaveCase = async () => {
+    if (!addForm.caseTitle || !addForm.caseNumber) return;
+    setSaving(true);
+    try {
+      const payload: Record<string, string> = {
+        title: addForm.caseTitle,
+        court: addForm.courtName,
+        caseNumber: addForm.caseNumber,
+      };
+      if (addForm.nextHearingDate) payload.nextHearingDate = addForm.nextHearingDate;
+      const data = await apiFetch("/cases/add", { method: "POST", body: JSON.stringify(payload) });
+      setCaseList(prev => [data.data ?? data, ...prev]);
+      setAddForm({ caseTitle: "", courtName: "", caseNumber: "", nextHearingDate: "" });
+      setShowAddCase(false);
+    } catch (e) {}
+    finally { setSaving(false); }
+  };
+
+  const setAnswer = async (caseId: string, stageIdx: number, answer: "yes" | "no") => {
+    const toggled = stageAnswers[caseId]?.[stageIdx] === answer ? null : answer;
     setStageAnswers(prev => ({
       ...prev,
       [caseId]: {
         ...(prev[caseId] || {}),
-        [stageIdx]: prev[caseId]?.[stageIdx] === answer ? null : answer,
+        [stageIdx]: toggled,
       },
     }));
+    // When YES is clicked (or un-toggled), sync currentStage to backend
+    if (answer === "yes" && toggled === "yes") {
+      try {
+        const newStage = CASE_STAGES[stageIdx];
+        const updated = await apiFetch(`/cases/${caseId}/stage`, { method: "PATCH", body: JSON.stringify({ newStage }) });
+        setCaseList(prev => prev.map((c: any) => (c._id ?? c.id) === caseId ? { ...c, ...(updated.data ?? {}) } : c));
+      } catch (e) {}
+    }
   };
 
   const getAnswer = (caseId: string, stageIdx: number): "yes" | "no" | null =>
@@ -486,15 +586,15 @@ function CaseTrackingSection() {
             <div className="bg-white rounded-2xl border border-[#0F172A] p-5" style={{ boxShadow: "0 4px 20px rgba(15,23,42,0.1)" }}>
               <p className="text-sm text-[#0F172A] mb-4" style={{ fontWeight: 700 }}>Add New Case</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {["Case Title", "Court Name", "Case Number", "Next Hearing Date"].map((f, i) => (
-                  <div key={i}>
-                    <label className="block text-[10px] text-[#9CA3AF] mb-1.5" style={{ fontWeight: 600 }}>{f.toUpperCase()}</label>
-                    <input placeholder={`Enter ${f.toLowerCase()}...`} className="w-full px-3 py-2 border border-[#E5E7EB] rounded-xl text-sm text-[#0F172A] placeholder-[#D1D5DB] focus:outline-none focus:border-[#0F172A] transition-colors" />
+                {([["caseTitle","Case Title"],["courtName","Court Name"],["caseNumber","Case Number"],["nextHearingDate","Next Hearing Date"]] as [keyof typeof addForm, string][]).map(([key, label]) => (
+                  <div key={key}>
+                    <label className="block text-[10px] text-[#9CA3AF] mb-1.5" style={{ fontWeight: 600 }}>{label.toUpperCase()}</label>
+                    <input value={addForm[key]} onChange={e => setAddForm(f => ({ ...f, [key]: e.target.value }))} placeholder={`Enter ${label.toLowerCase()}...`} className="w-full px-3 py-2 border border-[#E5E7EB] rounded-xl text-sm text-[#0F172A] placeholder-[#D1D5DB] focus:outline-none focus:border-[#0F172A] transition-colors" />
                   </div>
                 ))}
               </div>
               <div className="flex items-center gap-3 mt-4">
-                <button className="px-5 py-2 bg-[#0F172A] text-white rounded-xl text-sm hover:bg-[#1E3A5F] transition-colors" style={{ fontWeight: 600 }}>Save Case</button>
+                <button onClick={handleSaveCase} disabled={saving || !addForm.caseTitle || !addForm.caseNumber} className="px-5 py-2 bg-[#0F172A] text-white rounded-xl text-sm hover:bg-[#1E3A5F] transition-colors disabled:opacity-60" style={{ fontWeight: 600 }}>{saving ? "Saving..." : "Save Case"}</button>
                 <button onClick={() => setShowAddCase(false)} className="px-5 py-2 border border-[#E5E7EB] rounded-xl text-sm text-[#6B7280] hover:bg-[#F8FAFC] transition-colors" style={{ fontWeight: 500 }}>Cancel</button>
               </div>
             </div>
@@ -506,40 +606,32 @@ function CaseTrackingSection() {
         <div className="px-6 py-4 border-b border-[#E5E7EB] flex items-center gap-2">
           <BookOpen className="w-4 h-4 text-[#0F172A]" />
           <span className="text-[#0F172A] text-sm" style={{ fontWeight: 700 }}>Case Tracking</span>
-          <span className="text-[10px] bg-[#0F172A] text-white px-2 py-0.5 rounded-full ml-1" style={{ fontWeight: 600 }}>3 Active</span>
+          <span className="text-[10px] bg-[#0F172A] text-white px-2 py-0.5 rounded-full ml-1" style={{ fontWeight: 600 }}>{caseList.length} Active</span>
         </div>
         <div className="divide-y divide-[#F1F5F9]">
-          {cases.map((c) => (
-            <div key={c.id}>
+          {caseList.length === 0 && <p className="text-xs text-[#9CA3AF] px-6 py-4">No cases yet. Add your first case above.</p>}
+          {caseList.map((c: any) => (
+            <div key={c._id ?? c.id}>
               <div
                 className="px-6 py-4 hover:bg-[#F8FAFC] transition-colors cursor-pointer"
-                onClick={() => setExpanded(expanded === c.id ? null : c.id)}
+                onClick={() => setExpanded(expanded === (c._id ?? c.id) ? null : (c._id ?? c.id))}
               >
                 <div className="flex items-start gap-3">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
-                      <span className="text-[10px] text-[#9CA3AF]" style={{ fontWeight: 600 }}>{c.id}</span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full border ${c.statusColor}`} style={{ fontWeight: 600 }}>{c.status}</span>
+                      <span className="text-[10px] text-[#9CA3AF]" style={{ fontWeight: 600 }}>{c.caseNumber ?? c.id}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full border bg-blue-50 text-blue-600 border-blue-100" style={{ fontWeight: 600 }}>{c.currentStage ?? c.status ?? "Filed"}</span>
                     </div>
-                    <p className="text-sm text-[#0F172A] mb-0.5" style={{ fontWeight: 600 }}>{c.title}</p>
-                    <p className="text-xs text-[#9CA3AF]">{c.court} · Next: {c.nextDate}</p>
+                    <p className="text-sm text-[#0F172A] mb-0.5" style={{ fontWeight: 600 }}>{c.caseTitle ?? c.title}</p>
+                    <p className="text-xs text-[#9CA3AF]">{c.courtName ?? c.court}{c.nextHearingDate ? ` · Next: ${new Date(c.nextHearingDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}</p>
                   </div>
-                  <ChevronRight className={`w-4 h-4 text-[#9CA3AF] flex-shrink-0 transition-transform mt-0.5 ${expanded === c.id ? "rotate-90" : ""}`} />
-                </div>
-                <div className="mt-3">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] text-[#9CA3AF]">Progress</span>
-                    <span className="text-[10px] text-[#0F172A]" style={{ fontWeight: 600 }}>{c.progress}%</span>
-                  </div>
-                  <div className="h-1.5 bg-[#F1F5F9] rounded-full overflow-hidden">
-                    <div className="h-full bg-[#0F172A] rounded-full transition-all" style={{ width: `${c.progress}%` }} />
-                  </div>
+                  <ChevronRight className={`w-4 h-4 text-[#9CA3AF] flex-shrink-0 transition-transform mt-0.5 ${expanded === (c._id ?? c.id) ? "rotate-90" : ""}`} />
                 </div>
               </div>
 
               {/* Expanded: stages with YES / NO */}
               <AnimatePresence>
-                {expanded === c.id && (
+                {expanded === (c._id ?? c.id) && (
                   <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
@@ -549,7 +641,7 @@ function CaseTrackingSection() {
                     <p className="text-xs text-[#9CA3AF] px-6 pt-4 mb-4" style={{ fontWeight: 600 }}>CASE STAGES</p>
                     <div className="px-6 pb-5 space-y-3">
                       {CASE_STAGES.map((stage, i) => {
-                        const answer = getAnswer(c.id, i);
+                        const answer = getAnswer(c._id ?? c.id, i);
                         return (
                           <div
                             key={i}
@@ -590,7 +682,7 @@ function CaseTrackingSection() {
                             {/* YES / NO buttons */}
                             <div className="flex items-center gap-2 flex-shrink-0 ml-4" onClick={e => e.stopPropagation()}>
                               <button
-                                onClick={() => setAnswer(c.id, i, "yes")}
+                              onClick={() => setAnswer(c._id ?? c.id, i, "yes")}
                                 className={`px-3.5 py-1.5 rounded-xl text-xs transition-all ${
                                   answer === "yes"
                                     ? "bg-green-500 text-white shadow-sm"
@@ -601,7 +693,7 @@ function CaseTrackingSection() {
                                 YES
                               </button>
                               <button
-                                onClick={() => setAnswer(c.id, i, "no")}
+                                onClick={() => setAnswer(c._id ?? c.id, i, "no")}
                                 className={`px-3.5 py-1.5 rounded-xl text-xs transition-all ${
                                   answer === "no"
                                     ? "bg-red-500 text-white shadow-sm"
@@ -630,43 +722,42 @@ function CaseTrackingSection() {
 // ── My Documents Section ──────────────────────────────────────────────────────
 function MyDocumentsSection() {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [documents, setDocuments] = useState([
-    { id: 1, name: "FIR_Copy_2026.pdf", size: "1.2 MB", type: "PDF", date: "May 20, 2026", insights: null, loadingInsights: false },
-    { id: 2, name: "Land_Registry_Deed.pdf", size: "3.4 MB", type: "PDF", date: "Apr 15, 2026", insights: null, loadingInsights: false },
-    { id: 3, name: "Consumer_Forum_Notice.docx", size: "0.8 MB", type: "DOCX", date: "Mar 8, 2026", insights: null, loadingInsights: false },
-  ]);
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [uploading, setUploading] = useState(false);
 
-  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  useEffect(() => {
+    apiFetch("/documents/").then(d => setDocuments(d.data ?? d)).catch(() => {});
+  }, []);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    const newDocs = files.map((f, i) => ({
-      id: Date.now() + i,
-      name: f.name,
-      size: `${(f.size / (1024 * 1024)).toFixed(1)} MB`,
-      type: f.name.split(".").pop()?.toUpperCase() || "FILE",
-      date: new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }),
-      insights: null,
-      loadingInsights: false,
-    }));
-    setDocuments(prev => [...prev, ...newDocs]);
-    e.target.value = "";
+    if (!files.length) return;
+    setUploading(true);
+    try {
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append("document", file);
+        const data = await apiFetch("/documents/upload", { method: "POST", body: fd });
+        setDocuments(prev => [...prev, data.data ?? data]);
+      }
+    } catch (e) {}
+    finally { setUploading(false); e.target.value = ""; }
   };
 
-  const getInsights = (id: number) => {
-    setDocuments(prev => prev.map(d => d.id === id ? { ...d, loadingInsights: true } : d));
-    setTimeout(() => {
-      const sampleInsights = [
-        "This document contains references to Section 420 IPC (Cheating). The complainant may be entitled to file a civil suit in addition to the criminal complaint.",
-        "This land registry deed identifies 3 key parties. Ensure stamp duty has been paid as per current state rates. Any transfer post-registration requires fresh registration.",
-        "This consumer forum notice requires a response within 30 days. Attach all purchase receipts, warranty cards, and prior complaint records as evidence.",
-      ];
-      setDocuments(prev => prev.map(d =>
-        d.id === id ? { ...d, loadingInsights: false, insights: sampleInsights[Math.floor(Math.random() * sampleInsights.length)] } : d
+  const getInsights = async (id: string) => {
+    setDocuments(prev => prev.map((d: any) => (d._id ?? d.id) === id ? { ...d, loadingInsights: true } : d));
+    try {
+      const data = await apiFetch(`/documents/${id}/insights`);
+      setDocuments(prev => prev.map((d: any) =>
+        (d._id ?? d.id) === id ? { ...d, loadingInsights: false, insights: data.data } : d
       ));
-    }, 2000);
+    } catch (e) {
+      setDocuments(prev => prev.map((d: any) => (d._id ?? d.id) === id ? { ...d, loadingInsights: false } : d));
+    }
   };
 
-  const removeDoc = (id: number) => {
-    setDocuments(prev => prev.filter(d => d.id !== id));
+  const removeDoc = (id: string) => {
+    setDocuments(prev => prev.filter((d: any) => (d._id ?? d.id) !== id));
   };
 
   const typeColor: Record<string, string> = {
@@ -709,25 +800,25 @@ function MyDocumentsSection() {
         </div>
       ) : (
         <div className="space-y-3">
-          {documents.map((doc) => (
+          {documents.map((doc: any) => (
             <motion.div
-              key={doc.id}
+              key={doc._id ?? doc.id}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               className="bg-white rounded-2xl border border-[#E5E7EB] overflow-hidden"
               style={{ boxShadow: "0 4px 12px rgba(15,23,42,0.06)" }}
             >
               <div className="flex items-center gap-4 px-5 py-4">
-                <div className={`w-10 h-10 rounded-xl flex items-center justify-center border text-xs flex-shrink-0 ${typeColor[doc.type] || typeColor.FILE}`} style={{ fontWeight: 700 }}>
-                  {doc.type}
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center border text-xs flex-shrink-0 ${typeColor[(doc.fileType ?? doc.type ?? "FILE").toUpperCase()] || typeColor.FILE}`} style={{ fontWeight: 700 }}>
+                  {(doc.fileType ?? doc.type ?? "FILE").toUpperCase().slice(0,4)}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-[#0F172A] truncate" style={{ fontWeight: 600 }}>{doc.name}</p>
-                  <p className="text-xs text-[#9CA3AF]">{doc.size} · Uploaded {doc.date}</p>
+                  <p className="text-sm text-[#0F172A] truncate" style={{ fontWeight: 600 }}>{doc.originalName ?? doc.filename ?? doc.name}</p>
+                  <p className="text-xs text-[#9CA3AF]">{doc.size ? `${(doc.size/1024/1024).toFixed(1)} MB · ` : ""}{doc.uploadedAt ? `Uploaded ${new Date(doc.uploadedAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : doc.date ?? ""}</p>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <button
-                    onClick={() => getInsights(doc.id)}
+                    onClick={() => getInsights(doc._id ?? doc.id)}
                     disabled={doc.loadingInsights}
                     className="flex items-center gap-1.5 px-3.5 py-1.5 bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] text-white rounded-xl text-xs hover:opacity-90 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                     style={{ fontWeight: 600 }}
@@ -744,7 +835,7 @@ function MyDocumentsSection() {
                     )}
                   </button>
                   <button
-                    onClick={() => removeDoc(doc.id)}
+                    onClick={() => removeDoc(doc._id ?? doc.id)}
                     className="w-8 h-8 flex items-center justify-center rounded-xl border border-[#E5E7EB] hover:bg-red-50 hover:border-red-100 transition-colors text-[#9CA3AF] hover:text-red-500"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -764,9 +855,24 @@ function MyDocumentsSection() {
                     <div className="flex items-start gap-3">
                       <div className="w-7 h-7 bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5">
                       </div>
-                      <div>
-                        <p className="text-xs text-[#4338CA] mb-1" style={{ fontWeight: 700 }}>AI INSIGHTS</p>
-                        <p className="text-sm text-[#374151]" style={{ lineHeight: 1.65 }}>{doc.insights}</p>
+                      <div className="flex-1">
+                        <p className="text-xs text-[#4338CA] mb-2" style={{ fontWeight: 700 }}>AI INSIGHTS</p>
+                        {doc.insights.summary && (
+                          <p className="text-sm text-[#374151] mb-3" style={{ lineHeight: 1.65 }}>{doc.insights.summary}</p>
+                        )}
+                        {Array.isArray(doc.insights.keyInsights) && doc.insights.keyInsights.length > 0 && (
+                          <ul className="space-y-1.5">
+                            {doc.insights.keyInsights.map((point: string, idx: number) => (
+                              <li key={idx} className="flex items-start gap-2 text-sm text-[#374151]" style={{ lineHeight: 1.6 }}>
+                                <span className="w-1.5 h-1.5 rounded-full bg-[#6366F1] flex-shrink-0 mt-2" />
+                                {point}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                        {typeof doc.insights === "string" && (
+                          <p className="text-sm text-[#374151]" style={{ lineHeight: 1.65 }}>{doc.insights}</p>
+                        )}
                       </div>
                     </div>
                   </motion.div>
@@ -1145,7 +1251,7 @@ const faqs = [
 ];
 
 function HelpSupportSection() {
-  const [openFaq, setOpenFaq] = useState(null);
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
 
   return (
     <div className="space-y-4">
@@ -1200,7 +1306,14 @@ function HelpSupportSection() {
 }
 
 // ── Dashboard Home ─────────────────────────────────────────────────────────────
-function DashboardHome({ setActiveSection, setAgentOpen }) {
+function DashboardHome({ setActiveSection, setAgentOpen }: { setActiveSection: (s: string) => void; setAgentOpen: (v: boolean) => void }) {
+  const [cases, setCases] = useState<any[]>([]);
+  const [upcomingReminders, setUpcomingReminders] = useState<any[]>([]);
+
+  useEffect(() => {
+    apiFetch("/cases/").then(d => setCases(d.data ?? d)).catch(() => {});
+    apiFetch("/reminders/manual").then(d => setUpcomingReminders(d.data ?? [])).catch(() => {});
+  }, []);
   return (
     <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
       {/* Primary CTA */}
@@ -1328,14 +1441,11 @@ function DashboardHome({ setActiveSection, setAgentOpen }) {
             </div>
           </div>
           <div className="divide-y divide-[#F1F5F9]">
-            {cases.map((c, i) => (
+            {cases.map((c: any, i: number) => (
               <div key={i} className="px-4 py-3 hover:bg-[#F8FAFC] transition-colors cursor-pointer" onClick={() => setActiveSection("cases")}>
                 <div className="flex items-center justify-between mb-1.5">
-                  <p className="text-xs text-[#0F172A] truncate flex-1 pr-2" style={{ fontWeight: 500 }}>{c.title}</p>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded-full border flex-shrink-0 ${c.statusColor}`} style={{ fontWeight: 600 }}>{c.status}</span>
-                </div>
-                <div className="h-1 bg-[#F1F5F9] rounded-full overflow-hidden">
-                  <div className="h-full bg-[#0F172A] rounded-full" style={{ width: `${c.progress}%` }} />
+                  <p className="text-xs text-[#0F172A] truncate flex-1 pr-2" style={{ fontWeight: 500 }}>{c.caseTitle ?? c.title}</p>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full border flex-shrink-0 bg-blue-50 text-blue-600 border-blue-100" style={{ fontWeight: 600 }}>{c.currentStage ?? c.status ?? "Filed"}</span>
                 </div>
               </div>
             ))}
@@ -1357,14 +1467,14 @@ function DashboardHome({ setActiveSection, setAgentOpen }) {
             </button>
           </div>
           <div className="divide-y divide-[#F1F5F9]">
-            {upcomingReminders.slice(0, 3).map((r, i) => (
+            {upcomingReminders.slice(0, 3).map((r: any, i: number) => (
               <div key={i} className="flex items-center gap-3 px-4 py-3 hover:bg-[#F8FAFC] transition-colors">
-                <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 ${r.urgent ? "bg-red-50" : "bg-[#F1F5F9]"}`}>
-                  <Bell className={`w-3.5 h-3.5 ${r.urgent ? "text-red-500" : "text-[#9CA3AF]"}`} />
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 bg-[#F1F5F9]">
+                  <Bell className="w-3.5 h-3.5 text-[#9CA3AF]" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs text-[#0F172A] truncate" style={{ fontWeight: 500 }}>{r.title}</p>
-                  <p className="text-[10px] text-[#9CA3AF]">{r.date}</p>
+                  <p className="text-xs text-[#0F172A] truncate" style={{ fontWeight: 500 }}>{r.caseTitle ?? r.title}</p>
+                  <p className="text-[10px] text-[#9CA3AF]">{r.hearingDate ? new Date(r.hearingDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : ""}</p>
                 </div>
               </div>
             ))}
@@ -1415,6 +1525,26 @@ export function UserDashboard() {
   const navigate = useNavigate();
   const [activeSection, setActiveSection] = useState("dashboard");
   const [agentOpen, setAgentOpen] = useState(false);
+  const user = getUser();
+
+  useEffect(() => {
+    // Capture token from Google OAuth redirect (?token=...)
+    const params = new URLSearchParams(window.location.search);
+    const urlToken = params.get("token");
+    if (urlToken) {
+      setToken(urlToken);
+      window.history.replaceState({}, "", "/dashboard");
+    }
+    if (!getToken() && !urlToken) {
+      navigate("/login");
+    }
+  }, []);
+
+  const handleLogout = () => {
+    clearToken();
+    clearUser();
+    navigate("/");
+  };
 
   const renderContent = () => {
     switch (activeSection) {
@@ -1472,12 +1602,12 @@ export function UserDashboard() {
               <User className="w-4 h-4 text-white/60" />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-white text-xs truncate" style={{ fontWeight: 600 }}>Rajesh Kumar</p>
-              <p className="text-white/40 text-[10px] truncate">rajesh@email.com</p>
+              <p className="text-white text-xs truncate" style={{ fontWeight: 600 }}>{user?.name ?? "User"}</p>
+              <p className="text-white/40 text-[10px] truncate">{user?.email ?? ""}</p>
             </div>
           </div>
           <button
-            onClick={() => navigate("/")}
+            onClick={handleLogout}
             className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-white/40 hover:text-white/70 hover:bg-white/5 transition-all mt-1"
           >
             <LogOut className="w-4 h-4" />
@@ -1490,7 +1620,7 @@ export function UserDashboard() {
       <main className="flex-1 flex flex-col min-w-0">
         <div className="h-16 bg-white border-b border-[#E5E7EB] px-8 flex items-center justify-between flex-shrink-0" style={{ boxShadow: "0 1px 4px rgba(15,23,42,0.05)" }}>
           <div>
-            <h1 className="text-[#0F172A]" style={{ fontWeight: 700, fontSize: "1.0625rem" }}>Welcome back, Rajesh 👋</h1>
+            <h1 className="text-[#0F172A]" style={{ fontWeight: 700, fontSize: "1.0625rem" }}>Welcome back, {user?.name?.split(" ")[0] ?? "there"} 👋</h1>
             <p className="text-[#9CA3AF] text-xs">Here's your legal overview for today</p>
           </div>
           <div className="flex items-center gap-3">

@@ -2,19 +2,40 @@ import { useState } from "react";
 import { motion } from "motion/react";
 import { useNavigate } from "react-router";
 import { Scale, Eye, EyeOff, ArrowLeft } from "lucide-react";
+import { apiFetch, setToken, setUser } from "../../lib/api";
 
 export function SignUpPage() {
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
   const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    navigate("/dashboard");
+    setLoading(true);
+    setError("");
+    try {
+      const data = await apiFetch("/auth/signup", {
+        method: "POST",
+        body: JSON.stringify(form),
+      });
+      setToken(data.token);
+      setUser({ name: data.user.name, email: data.user.email });
+      navigate("/dashboard");
+    } catch (err: any) {
+      setError(err.message ?? "Signup failed. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleGoogle = () => {
+    window.location.href = "http://localhost:5000/api/auth/google";
   };
 
   return (
@@ -69,6 +90,7 @@ export function SignUpPage() {
             {/* Google Button */}
             <button
               type="button"
+              onClick={handleGoogle}
               className="w-full flex items-center justify-center gap-3 border border-[#E5E7EB] rounded-xl py-3 mb-6 hover:bg-[#F8FAFC] transition-colors"
               style={{ fontWeight: 500, fontSize: "0.9375rem" }}
             >
@@ -156,13 +178,18 @@ export function SignUpPage() {
                 <button type="button" className="text-[#0F172A] hover:underline" style={{ fontWeight: 500 }}>Privacy Policy</button>.
               </p>
 
+              {error && (
+                <p className="text-xs text-red-500 text-center bg-red-50 border border-red-100 rounded-xl px-3 py-2">{error}</p>
+              )}
+
               {/* Submit */}
               <button
                 type="submit"
-                className="w-full bg-[#0F172A] text-white rounded-xl py-3 hover:bg-[#1E3A5F] transition-colors"
+                disabled={loading}
+                className="w-full bg-[#0F172A] text-white rounded-xl py-3 hover:bg-[#1E3A5F] transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
                 style={{ fontWeight: 600, fontSize: "0.9375rem" }}
               >
-                Create Account
+                {loading ? "Creating account..." : "Create Account"}
               </button>
             </form>
 
