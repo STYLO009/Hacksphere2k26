@@ -1,3 +1,4 @@
+<img width="1644" height="1136" alt="ARCHITECTURE" src="https://github.com/user-attachments/assets/4ea3deef-c1ef-40c8-a3fa-b3d723597580" />
 
 # NyayaAI — AI-Powered Legal Assistance Platform
 
