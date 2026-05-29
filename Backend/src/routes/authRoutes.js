@@ -75,7 +75,7 @@ router.get(
     // REDIRECT USER
     // ======================================
 
-    res.redirect("/api/auth/dashboard");
+    res.redirect(`http://localhost:5173/dashboard?token=${token}`);
   },
 );
 

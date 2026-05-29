@@ -5,6 +5,16 @@ const { GoogleGenAI } = require('@google/genai');
 // Initialize Gemini SDK (Make sure GEMINI_API_KEY is in your .env)
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+// 0. Get all reminders for current user
+const getAllReminders = async (req, res) => {
+  try {
+    const reminders = await Reminder.find({ userId: req.user.id }).sort({ hearingDate: 1 });
+    res.json({ data: reminders });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 // 1. Handle Manual Submission
 const createManualReminder = async (req, res) => {
   try {
@@ -89,4 +99,4 @@ const createAiReminder = async (req, res) => {
   }
 };
 
-module.exports = { createManualReminder, createAiReminder };
+module.exports = { getAllReminders, createManualReminder, createAiReminder };

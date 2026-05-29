@@ -15,14 +15,17 @@ const createCase = async (req, res) => {
     const { caseNumber, title, court, nextHearingDate } = req.body;
     const userId = req.user.id;
 
+    const parsedDate = nextHearingDate ? new Date(nextHearingDate) : null;
+    const isValidDate = parsedDate && !isNaN(parsedDate.getTime());
+
     const newCase = new Case({
       userId,
       caseNumber,
       title,
       court,
-      nextHearingDate: new Date(nextHearingDate),
+      ...(isValidDate ? { nextHearingDate: parsedDate } : {}),
       currentStage: 'Filed',
-      progressPercentage: 20, // Default starting progress
+      progressPercentage: 20,
       statusTag: 'Filed'
     });
 
