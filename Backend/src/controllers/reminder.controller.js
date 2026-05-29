@@ -57,15 +57,15 @@ const createAiReminder = async (req, res) => {
       model: 'gemini-2.5-flash',
       contents: [
         {
-          inlineData: {
-            data: fileBase64,
-            mimeType: mimeType
-          }
-        },
-        prompt
+          role: "user",
+          parts: [
+            { inlineData: { data: fileBase64, mimeType: mimeType } },
+            { text: prompt }
+          ]
+        }
       ],
       config: {
-        responseMimeType: "application/json" // Enforces a parseable JSON response
+        responseMimeType: "application/json"
       }
     });
 
